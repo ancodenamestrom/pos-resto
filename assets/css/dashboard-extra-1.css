@@ -1,0 +1,13 @@
+  body:not(.sim-authenticated) > #app-header,
+  body:not(.sim-authenticated) > .container { display:none !important; }
+  #sim-login-screen{position:fixed;inset:0;z-index:999999;background:linear-gradient(135deg,#10243a,#174b58);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,sans-serif}
+  #sim-login-card{width:min(430px,100%);background:#fff;border-radius:20px;padding:30px;box-shadow:0 20px 60px #0005;color:#172033}
+  #sim-login-card h2{margin:0 0 8px;text-align:center;font-size:1.5rem}
+  #sim-login-card p{margin:0 0 22px;text-align:center;color:#64748b;font-size:.9rem}
+  #sim-login-card label{display:block;font-weight:700;font-size:.86rem;margin:12px 0 6px}
+  #sim-login-card select,#sim-login-card input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cbd5e1;border-radius:9px;font-size:1rem}
+  #sim-login-card button{width:100%;margin-top:18px;padding:12px;border:0;border-radius:9px;background:#0f766e;color:white;font-weight:700;font-size:1rem;cursor:pointer}
+  #sim-login-back-home{display:block;width:100%;box-sizing:border-box;margin-top:10px;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;text-align:center;text-decoration:none;color:#334155;font-weight:700;font-size:.95rem;background:#f8fafc}
+  #sim-login-back-home:hover{background:#e2e8f0}
+  #sim-login-error{color:#b91c1c;font-size:.85rem;min-height:18px;margin-top:10px;text-align:center}
+  #sim-logout-btn{position:fixed;right:16px;top:16px;z-index:99990;border:0;border-radius:8px;padding:9px 13px;background:#b91c1c;color:#fff;font-weight:700;cursor:pointer}

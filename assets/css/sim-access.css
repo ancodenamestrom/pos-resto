@@ -1,0 +1,7 @@
+    .feature-toggle-item {display:flex;align-items:center;gap:9px;padding:11px 12px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-color);font-size:.88rem;font-weight:600;cursor:pointer;}
+    .feature-toggle-item input {width:17px;height:17px;accent-color:var(--primary);cursor:pointer;}
+    .access-group {border:1px solid var(--border-color);border-radius:12px;padding:14px;}
+    .access-group h4 {margin-bottom:10px;font-size:.95rem;}
+    .access-list {display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px;}
+    #access-status {font-size:.82rem;font-weight:600;align-self:center;}
+  

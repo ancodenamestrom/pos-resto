@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pesan Online – World Taste</title>
+  <!-- Sinkronisasi real time (Supabase). Harus dimuat sebelum script aplikasi. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="assets/js/supabase-config.js"></script>
+  <script src="assets/js/supabase-sync.js" data-scope="customer"></script>
+
+<link rel="stylesheet" href="assets/css/pesan.css"></head><body>
+<header>
+ <div class="brand"><img id="logo" alt=""><div><span id="sn">World Taste</span><small>Pesan online</small></div></div>
+ <input id="q" type="search" placeholder="Cari menu…">
+ <button class="rbtn" onclick="refreshMenu(true)" title="Ambil menu, diskon, stok & status meja terbaru dari kasir">🔄 Refresh</button>
+ <button class="rbtn" onclick="openMyOrders()">📋 Pesanan Saya</button>
+  <button class="cartbtn" onclick="openCart()">🛒 Keranjang<b id="cn">0</b></button>
+</header>
+<div class="wrap">
+ <div class="hero"><div><h1>Pesan makanan favoritmu 🍽️</h1><p>Pilih menu, pesan langsung ke kasir, dan beri bintang untuk menu yang kamu suka.</p></div>
+  <div class="score"><big id="avg">–</big><span class="st" id="avgst">★★★★★</span><div style="font-size:.78rem;margin-top:2px" id="avgn"></div></div></div>
+ <div class="pills" id="pills"></div>
+ <div class="upd" id="upd"></div>
+ <div class="grid" id="grid"></div>
+ <div class="sec"><h2>⭐ Ulasan Pelanggan <button class="btn" onclick="openReview()">Tulis Ulasan</button></h2><div id="rvs"></div></div>
+ <div class="sec"><h2>💁 Pelayanan <button class="btn" onclick="openService()">Nilai Pelayanan</button></h2><div id="svcsum" style="margin-bottom:10px"></div><div id="svcs"></div></div>
+ <div class="sec"><h2>📢 Pengaduan <button class="btn o" onclick="openComplaint()">Sampaikan Pengaduan</button></h2><p style="font-size:.9rem;color:var(--mu)">Kurang puas dengan makanan atau pelayanan? Sampaikan langsung ke pihak resto lewat WhatsApp.</p></div>
+</div>
+<div class="ov" id="ov" onclick="if(event.target==this)closeMod()"><div class="box" id="box"></div></div>
+<div class="drawer" id="dr"><div style="border-bottom:1px solid var(--br)"><button class="x" onclick="closeCart()">Tutup</button><h3>🛒 Pesananmu</h3></div><div id="drb" style="flex:1"></div></div>
+<div id="toast"></div>
+<script src="assets/js/pesan-app.js"></script></body></html>
