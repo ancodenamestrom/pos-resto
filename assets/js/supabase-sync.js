@@ -213,6 +213,61 @@
     return by;
   }
 
+  /* ---------- Foto disimpan terpisah ----------
+     Foto (data:image/...;base64) di dalam data diganti "kode foto" (wtimg:...) sebelum dikirim,
+     dan fotonya disimpan sekali sebagai baris sendiri di kv_store. Data kasir/menu jadi kecil,
+     dan foto yang sama tidak dikirim ulang setiap kali kasir menyimpan. Di browser, data tetap utuh. */
+  var IMG_RE = /data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+\/=]{1500,}/g;
+  var TOK_RE = /wtimg:[0-9a-z]+_[0-9a-z]+_[0-9]+/g;
+  var NOT_IMG = '&key=not.like.' + enc('wtimg:*');
+  var imgCache = {};      // kode -> foto
+  var imgOnServer = {};   // kode yang sudah pasti ada di server
+  function h2(str) {
+    var a = 5381, b = 0;
+    for (var i = 0; i < str.length; i++) { var c = str.charCodeAt(i); a = ((a << 5) + a + c) | 0; b = (c + (b << 6) + (b << 16) - b) | 0; }
+    return (a >>> 0).toString(36) + '_' + (b >>> 0).toString(36);
+  }
+  function imgToken(d) { return 'wtimg:' + h2(d) + '_' + d.length; }
+  function harvest(v) {
+    if (v && v.indexOf('data:image') >= 0) v.replace(IMG_RE, function (d) { imgCache[imgToken(d)] = d; return d; });
+  }
+  function pack(v) {
+    var toks = [];
+    var out = v.replace(IMG_RE, function (d) { var t = imgToken(d); imgCache[t] = d; if (toks.indexOf(t) < 0) toks.push(t); return t; });
+    return { value: out, toks: toks };
+  }
+  function tokensIn(v) { var m = (v && v.indexOf('wtimg:') >= 0) ? v.match(TOK_RE) : null; return m || []; }
+  function missingOf(values) {
+    var miss = [];
+    values.forEach(function (v) { tokensIn(v).forEach(function (t) { imgOnServer[t] = 1; if (!imgCache[t] && miss.indexOf(t) < 0) miss.push(t); }); });
+    return miss;
+  }
+  function unpack(v) { return tokensIn(v).length ? v.replace(TOK_RE, function (t) { return imgCache[t] || t; }) : v; }
+  function imgPath(toks) { return 'kv_store?select=key,value&key=in.(' + toks.map(function (t) { return '"' + t + '"'; }).join(',') + ')'; }
+  function chunks(arr, n) { var out = []; for (var i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; }
+  function storeImgs(rows) { rows.forEach(function (r) { imgCache[r.key] = r.value; imgOnServer[r.key] = 1; }); }
+  function fetchImgsSync(toks) { chunks(toks, 30).forEach(function (c) { storeImgs(syncGet(imgPath(c))); }); }
+  function fetchImgs(toks) {
+    return chunks(toks, 30).reduce(function (pr, c) { return pr.then(function () { return getJSON(imgPath(c)).then(storeImgs); }); }, Promise.resolve());
+  }
+  // Unggah foto yang belum ada di server, sedikit demi sedikit (maks ~400 KB per kiriman)
+  function uploadImgs(toks) {
+    var need = toks.filter(function (t) { return !imgOnServer[t] && imgCache[t]; });
+    var batches = [], cur = [], size = 0;
+    need.forEach(function (t) {
+      var row = { key: t, value: imgCache[t], client_id: clientId };
+      if (cur.length && size + row.value.length > 400000) { batches.push(cur); cur = []; size = 0; }
+      cur.push(row); size += row.value.length;
+    });
+    if (cur.length) batches.push(cur);
+    return batches.reduce(function (pr, b) {
+      return pr.then(function () {
+        return send('POST', 'kv_store?on_conflict=key', JSON.stringify(b), 'resolution=ignore-duplicates,return=minimal')
+          .then(function () { b.forEach(function (r) { imgOnServer[r.key] = 1; }); });
+      });
+    }, Promise.resolve());
+  }
+
   /* ---------- 1) Ambil data awal (blocking, sebelum script aplikasi jalan) ---------- */
   function syncGet(path) {
     var x = new XMLHttpRequest();
@@ -226,13 +281,18 @@
 
   function initialPull() {
     var blobPath = 'kv_store?select=key,value,updated_at';
-    if (SCOPE === 'customer') blobPath += '&key=in.(' + CUSTOMER_BLOBS.join(',') + ')';
+    blobPath += SCOPE === 'customer' ? '&key=in.(' + CUSTOMER_BLOBS.join(',') + ')' : NOT_IMG;
     var blobs = syncGet(blobPath), remote = {};
+    // Foto yang sudah ada di browser ini tidak perlu diunduh lagi
+    for (var j = 0; j < ls.length; j++) { var lk = ls.key(j); if (isSynced(lk)) harvest(origGet.call(ls, lk)); }
+    var use = blobs.filter(function (r) { return canPullBlob(r.key); });
+    var miss = missingOf(use.map(function (r) { return r.value; }));
+    if (miss.length) fetchImgsSync(miss);
     blobs.forEach(function (r) {
       remote[r.key] = 1;
       sinceStore = later(sinceStore, r.updated_at);
-      if (canPullBlob(r.key)) applyBlob(r.key, r.value, false);
     });
+    use.forEach(function (r) { applyBlob(r.key, unpack(r.value), false); });
 
     var itemPath = 'kv_items?select=key,item_id,value,created_at&order=created_at.asc&limit=5000';
     if (SCOPE === 'customer') itemPath += '&key=in.(' + CUSTOMER_ITEMS.join(',') + ')';
@@ -288,8 +348,11 @@
       }
       if (v === lastBlob[k]) return;
       inflight[k] = 1;
-      send('POST', 'kv_store?on_conflict=key', JSON.stringify([{ key: k, value: v, client_id: clientId }]),
-           'resolution=merge-duplicates,return=minimal', keepalive === true)
+      var pk = pack(v);
+      uploadImgs(pk.toks).then(function () {
+        return send('POST', 'kv_store?on_conflict=key', JSON.stringify([{ key: k, value: pk.value, client_id: clientId }]),
+           'resolution=merge-duplicates,return=minimal', keepalive === true && pk.toks.every(function (t) { return imgOnServer[t]; }));
+      })
         .then(function () {
           lastBlob[k] = v; failCount[k] = 0;
           pushFailing = Object.keys(failCount).some(function (x) { return failCount[x] > 0; });
@@ -297,7 +360,7 @@
         })
         .catch(function (e) {
           failCount[k] = (failCount[k] || 0) + 1; pushFailing = true;
-          reportError('Gagal mengirim ' + k + ' (' + Math.round(v.length / 1024) + ' KB)', e);
+          reportError('Gagal mengirim ' + k + ' (' + Math.round(pk.value.length / 1024) + ' KB)', e);
           pending[k] = 1;
         })
         .then(function () { delete inflight[k]; if (pending[k]) setTimeout(flush, backoff(k)); });
@@ -353,18 +416,21 @@
     if (pulling) { pullAgain = true; return; }
     pulling = true;
     var notMe = '&or=' + enc('(client_id.is.null,client_id.neq.' + clientId + ')');
-    var bPath = 'kv_store?select=key,value,updated_at&updated_at=gte.' + enc(sinceParam(sinceStore)) + notMe;
+    var bPath = 'kv_store?select=key,value,updated_at&updated_at=gte.' + enc(sinceParam(sinceStore)) + notMe + (SCOPE === 'customer' ? '' : NOT_IMG);
     var iPath = 'kv_items?select=key,item_id,value,created_at&order=created_at.asc&limit=1000&created_at=gte.' + enc(sinceParam(sinceItems)) + notMe;
     if (SCOPE === 'customer') {
       bPath += '&key=in.(' + CUSTOMER_BLOBS.join(',') + ')';
       iPath += '&key=in.(' + CUSTOMER_ITEMS.join(',') + ')';
     }
     Promise.all([getJSON(bPath), getJSON(iPath)]).then(function (res) {
+      var miss = missingOf(res[0].filter(function (r) { return canPullBlob(r.key); }).map(function (r) { return r.value; }));
+      return miss.length ? fetchImgs(miss).then(function () { return res; }) : res;
+    }).then(function (res) {
       var changedOnRecover = false;
       res[0].forEach(function (r) {
         sinceStore = later(sinceStore, r.updated_at);
         if (canPullBlob(r.key) && (holdPush || !pending[r.key]) && !inflight[r.key]) {
-          if (applyBlob(r.key, r.value, true) && holdPush) changedOnRecover = true;
+          if (applyBlob(r.key, unpack(r.value), true) && holdPush) changedOnRecover = true;
         }
       });
       var by = groupItems(res[1]);
@@ -417,7 +483,7 @@
       var client = lib.createClient(BASE, KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
       var onChange = function (p) {
         if (p.eventType === 'DELETE') { onRemoteDelete(p.old && p.old.key); return; }
-        if (p.new && p.new.client_id === clientId) return;
+        if (p.new && (p.new.client_id === clientId || String(p.new.key || '').indexOf('wtimg:') === 0)) return;
         schedulePull();
       };
       client.channel('pos-sync')
