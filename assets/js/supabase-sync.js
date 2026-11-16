@@ -222,6 +222,8 @@
   var NOT_IMG = '&key=not.like.' + enc('wtimg:*');
   var imgCache = {};      // kode -> foto
   var imgOnServer = {};   // kode yang sudah pasti ada di server
+  var repack = {};        // data di server yang fotonya masih menempel -> kirim ulang dalam bentuk ringkas
+  function hasInlineImg(v) { IMG_RE.lastIndex = 0; var r = IMG_RE.test(v || ''); IMG_RE.lastIndex = 0; return r; }
   function h2(str) {
     var a = 5381, b = 0;
     for (var i = 0; i < str.length; i++) { var c = str.charCodeAt(i); a = ((a << 5) + a + c) | 0; b = (c + (b << 6) + (b << 16) - b) | 0; }
@@ -292,7 +294,10 @@
       remote[r.key] = 1;
       sinceStore = later(sinceStore, r.updated_at);
     });
-    use.forEach(function (r) { applyBlob(r.key, unpack(r.value), false); });
+    use.forEach(function (r) {
+      applyBlob(r.key, unpack(r.value), false);
+      if (SCOPE === 'staff' && canPush(r.key) && hasInlineImg(r.value)) { repack[r.key] = 1; pending[r.key] = 1; }
+    });
 
     var itemPath = 'kv_items?select=key,item_id,value,created_at&order=created_at.asc&limit=5000';
     if (SCOPE === 'customer') itemPath += '&key=in.(' + CUSTOMER_ITEMS.join(',') + ')';
@@ -346,7 +351,7 @@
           .then(function () { delete inflight[k]; if (pending[k]) setTimeout(flush, backoff(k)); });
         return;
       }
-      if (v === lastBlob[k]) return;
+      if (v === lastBlob[k] && !repack[k]) return;
       inflight[k] = 1;
       var pk = pack(v);
       uploadImgs(pk.toks).then(function () {
@@ -354,7 +359,7 @@
            'resolution=merge-duplicates,return=minimal', keepalive === true && pk.toks.every(function (t) { return imgOnServer[t]; }));
       })
         .then(function () {
-          lastBlob[k] = v; failCount[k] = 0;
+          lastBlob[k] = v; failCount[k] = 0; delete repack[k];
           pushFailing = Object.keys(failCount).some(function (x) { return failCount[x] > 0; });
           if (!pushFailing && PosSync.status === 'error') setStatus(rtLive ? 'live' : 'poll');
         })
