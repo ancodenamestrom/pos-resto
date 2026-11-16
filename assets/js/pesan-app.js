@@ -5,11 +5,13 @@ const SS={};SNAP.products.forEach(p=>SS[p.id]=p.sold||0);
 function fillSold(list){const has={};list.forEach(p=>{if((p.sold||0)>0)has[p.category]=1});return list.map(p=>has[p.category]?p:Object.assign({},p,{sold:SS[p.id]||0}))}
 const bestTag=(p,B)=>B.has(p.id)?'<span class="bs">🔥 Best Seller</span>':'';
 const IM={};SNAP.products.forEach(p=>IM[p.id]=p.img);
+const NOIMG='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 3"><rect width="4" height="3" fill="#f3ede7"/><text x="2" y="1.85" font-size="1.1" text-anchor="middle">🍽️</text></svg>');
 let D=SNAP,S,P,TB=null;const $=id=>document.getElementById(id);
 function loadData(){let pub=null;try{pub=JSON.parse(localStorage.getItem('wt_menu_public')||'null')}catch(e){}
  if(pub&&Array.isArray(pub.products)&&pub.products.length){let big=null;
   D={logo:SNAP.logo,at:pub.at,settings:Object.assign({},SNAP.settings,pub.settings),products:pub.products.map(p=>{let img=IM[p.id];
    if(!img){try{big=big||JSON.parse(localStorage.getItem('world_taste_pos_app_data')||'{}');const q=(big.products||[]).find(x=>x.id==p.id);img=q&&q.img||''}catch(e){}}
+   if(p.img&&String(p.img).startsWith('data:'))img=p.img;if(!img)img=NOIMG;
    return Object.assign({},p,{img})})};TB=pub.tables||null}else{D=SNAP;TB=null}
  D.products=fillSold(D.products);S=D.settings;P=D.products}
 const dsc=(p,q=1)=>{const v=Math.max(0,Number(p.discountValue)||0),g=p.price*q;return Math.min(g,Math.max(0,p.discountType==='rupiah'?v*q:g*Math.min(v,100)/100))};
