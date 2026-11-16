@@ -3011,6 +3011,27 @@
       });
     })();
 
+    /* Data dashboard diubah dari perangkat lain (sinkron Supabase) -> muat ulang bagian terkait tanpa reload halaman.
+       Tanpa ini, dashboard yang sudah terbuka memakai data lama dan bisa menimpa perubahan perangkat lain saat menyimpan. */
+    (function () {
+      const timers = {};
+      const later = (id, fn) => {
+        clearTimeout(timers[id]);
+        timers[id] = setTimeout(() => { try { fn(); } catch (e) { console.warn('Muat ulang data dashboard gagal:', e); } }, 300);
+      };
+      const THEME_KEYS = ['resto_sim_theme', 'resto_sim_store_name', 'resto_sim_group_name', 'resto_sim_logo',
+        'resto_sim_header_bg', 'resto_sim_app_bg', 'resto_sim_overlay_val', 'resto_sim_card_opacity'];
+      window.addEventListener('storage', (ev) => {
+        const k = ev.key;
+        if (k === 'resto_sim_expenses') later('exp', () => { if (ev.newValue === null) expenseData = []; loadExpensesFromStorage(); applyFilters(); });
+        else if (k === 'resto_sim_stock') later('stock', () => { loadStockFromStorage(); applyFilters(); });
+        else if (k === 'resto_sim_recipes') later('rec', () => { loadRecipesFromStorage(); applyFilters(); });
+        else if (k === 'resto_sim_extra_margin_menus' || k === 'resto_sim_hidden_margin_menus' || k === DASH_RES_KEY) later('all', () => applyFilters());
+        else if (k === 'resto_sim_org_members' || k === 'resto_sim_org_name') later('org', () => { loadOrgMembersFromStorage(); renderOrg(); });
+        else if (THEME_KEYS.includes(k)) later('theme', () => loadCustomizationTheme());
+      });
+    })();
+
     /* INITIALIZATION */
     window.addEventListener('DOMContentLoaded', () => {
       document.getElementById('exp-date').value = new Date().toISOString().slice(0, 10);
