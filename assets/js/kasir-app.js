@@ -228,7 +228,9 @@
           settings: { storeName: st.storeName, serviceRate: st.serviceRate, ppnRate: st.ppnRate, takeAwayFee: st.takeAwayFee, tableCounts: st.tableCounts, contactWA: st.contactWA || '' },
           products: (appData.products || []).map(p => ({
             id: p.id, name: p.name, category: p.category, price: Number(p.price) || 0, stock: Number(p.stock) || 0,
-            discountType: p.discountType === 'rupiah' ? 'rupiah' : 'percent', discountValue: Number(p.discountValue) || 0, sold: sold[p.id] || 0
+            discountType: p.discountType === 'rupiah' ? 'rupiah' : 'percent', discountValue: Number(p.discountValue) || 0, sold: sold[p.id] || 0,
+            // Foto hasil upload di kasir ikut dikirim ke halaman pesan (foto bawaan sudah ada di assets/img)
+            img: (typeof p.img === 'string' && p.img.startsWith('data:')) ? p.img : ''
           })),
           tables: tables
         };
@@ -2101,7 +2103,9 @@
         }
       } else {
         const initialStock = parseInt(document.getElementById('prod-stock').value) || 0;
-        const newId = 'PRD-' + String(appData.products.length + 1).padStart(3, '0');
+        // Kode menu = nomor terbesar + 1, supaya tidak kembar walau ada menu yang pernah dihapus
+        const maxNo = appData.products.reduce((m, x) => Math.max(m, parseInt(String(x.id).replace(/\D/g, ''), 10) || 0), 0);
+        const newId = 'PRD-' + String(maxNo + 1).padStart(3, '0');
         const now = getNowFormatted();
 
         appData.products.push({
