@@ -10,6 +10,8 @@
     bbRender();
   }
   function bbPersist(){ localStorage.setItem(bbKey,JSON.stringify(bbItems)); }
+  // Ambil daftar terbaru (bisa sudah diubah perangkat lain lewat sinkron) sebelum mengubah data
+  function bbFresh(){ try { const s=localStorage.getItem(bbKey); if(s){ const a=JSON.parse(s); if(Array.isArray(a)) bbItems=a; } } catch(e) {} }
   window.bbRender=function(){
     const q=(document.getElementById('bb-search')?.value||'').toLowerCase();
     const cat=document.getElementById('bb-filter')?.value||'ALL';
@@ -31,6 +33,7 @@
   window.bbSave=async function(e){
     e.preventDefault();
     if(!(await verifyReservationDeleteAuth('menambah atau mengedit bahan baku'))) return;
+    bbFresh();
     const id=document.getElementById('bb-edit-id').value;
     const item={name:document.getElementById('bb-name').value.trim(),category:document.getElementById('bb-category').value,qty:Number(document.getElementById('bb-qty').value),unit:document.getElementById('bb-unit').value.trim(),minStock:Number(document.getElementById('bb-min').value),price:Number(document.getElementById('bb-price').value)};
     if(id){ const old=bbItems.find(x=>String(x.id)===id); if(old) Object.assign(old,item); }
@@ -54,11 +57,13 @@
   };
   window.bbDelete=async function(id){
     if(!(await verifyReservationDeleteAuth('menghapus bahan baku'))) return;
+    bbFresh();
     const x=bbItems.find(v=>v.id===id); if(!x||!confirm('Hapus bahan baku "'+x.name+'"?'))return;
     bbItems=bbItems.filter(v=>v.id!==id); bbPersist(); bbRender();
   };
   window.bbQuickAdd=async function(id,amount){
     if(!(await verifyReservationDeleteAuth('menambah stok bahan baku'))) return;
+    bbFresh();
     const x=bbItems.find(v=>v.id===id); if(!x)return;
     x.qty=Number((Number(x.qty)+Number(amount)).toFixed(2)); bbPersist(); bbRender();
     if(typeof showToast==='function') showToast('Stok '+x.name+' bertambah '+amount+' '+x.unit+'.','success');
@@ -69,4 +74,6 @@
     document.getElementById('bb-cancel').style.display='none';
   };
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bbLoad); else bbLoad();
+  // Perubahan bahan baku dari perangkat/tab lain langsung tampil
+  window.addEventListener('storage',function(e){ if(e.key===bbKey && e.newValue){ bbFresh(); try{ bbRender(); }catch(err){} } });
 })();
