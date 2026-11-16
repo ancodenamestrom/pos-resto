@@ -1,4 +1,4 @@
-  /* ==========================================================================
+/* ==========================================================================
    SINKRONISASI REAL TIME VIA SUPABASE
    Cara kerja:
    - Aplikasi tetap menyimpan data di localStorage seperti biasa.
@@ -172,6 +172,9 @@
 
   /* ---------- State ---------- */
   var ready = false;
+  // Kalau data awal gagal diambil, data di browser ini mungkin sudah lama.
+  // Tahan pengiriman sampai data server berhasil diambil, supaya data lama tidak menimpa data baru.
+  var holdPush = false;
   var lastBlob = {};      // nilai terakhir yang sudah sama dengan server
   var knownItems = {};    // key -> {item_id: true}
   var pending = {};       // kunci yang menunggu dikirim
@@ -181,9 +184,10 @@
   function applyBlob(k, v, notify) {
     var old = origGet.call(ls, k);
     lastBlob[k] = v;
-    if (old === v) return;
-    try { origSet.call(ls, k, v); } catch (e) { console.warn('[sync] localStorage penuh, gagal menyimpan', k); return; }
+    if (old === v) return false;
+    try { origSet.call(ls, k, v); } catch (e) { console.warn('[sync] localStorage penuh, gagal menyimpan', k); return false; }
     if (notify) fire(k, old, v);
+    return true;
   }
 
   function applyItems(k, rows, notify) {
@@ -268,6 +272,7 @@
   function backoff(k) { return failCount[k] ? Math.min(30000, 2000 * Math.pow(2, failCount[k] - 1)) : 300; }
 
   function flush(keepalive) {
+    if (holdPush) return;
     Object.keys(pending).forEach(function (k) {
       if (inflight[k]) return;                 // tunggu kiriman sebelumnya selesai
       delete pending[k];
@@ -355,12 +360,31 @@
       iPath += '&key=in.(' + CUSTOMER_ITEMS.join(',') + ')';
     }
     Promise.all([getJSON(bPath), getJSON(iPath)]).then(function (res) {
+      var changedOnRecover = false;
       res[0].forEach(function (r) {
         sinceStore = later(sinceStore, r.updated_at);
-        if (canPullBlob(r.key) && !pending[r.key] && !inflight[r.key]) applyBlob(r.key, r.value, true);
+        if (canPullBlob(r.key) && (holdPush || !pending[r.key]) && !inflight[r.key]) {
+          if (applyBlob(r.key, r.value, true) && holdPush) changedOnRecover = true;
+        }
       });
       var by = groupItems(res[1]);
       Object.keys(by).forEach(function (k) { applyItems(k, by[k], true); });
+      if (holdPush) {
+        // Data server berbeda dari yang sudah dimuat aplikasi: muat ulang halaman staf sekali
+        // agar kasir/dashboard memakai data terbaru (maksimal sekali per menit, mencegah loop).
+        var last = 0; try { last = Number(sessionStorage.getItem('pos_sync_reload') || 0); } catch (e) {}
+        if (changedOnRecover && SCOPE === 'staff' && Date.now() - last > 60000) {
+          try { sessionStorage.setItem('pos_sync_reload', String(Date.now())); } catch (e) {}
+          console.info('[sync] Tersambung kembali. Memuat ulang halaman dengan data terbaru...');
+          pending = {};
+          location.reload();
+          return;
+        }
+        holdPush = false;
+        console.info('[sync] Tersambung kembali. Data terbaru dari server sudah dimuat.');
+        if (changedOnRecover) Object.keys(pending).forEach(function (k) { if (origGet.call(ls, k) === lastBlob[k]) delete pending[k]; });
+        if (Object.keys(pending).length) setTimeout(flush, 300);
+      }
       if (!pushFailing && (PosSync.status === 'error' || PosSync.status === 'offline')) setStatus(rtLive ? 'live' : 'poll');
     }).catch(function (e) {
       reportError('Gagal mengambil data', e);
@@ -415,7 +439,8 @@
     initialPull();
     setStatus('poll');
   } catch (e) {
-    reportError('Tidak bisa mengambil data awal (memakai data lokal dulu)', e);
+    holdPush = true;
+    reportError('Data awal belum bisa diambil, mencoba lagi otomatis', e);
   }
   ready = true;
   PosSync.enabled = true;
