@@ -1,4 +1,4 @@
-/* ==========================================================================
+  /* ==========================================================================
    SINKRONISASI REAL TIME VIA SUPABASE
    Cara kerja:
    - Aplikasi tetap menyimpan data di localStorage seperti biasa.
@@ -65,6 +65,8 @@
   function explain(e) {
     if (e && e.cfg) return e.cfg;
     var st = e && e.status || 0, b = (e && (e.body || e.message)) || '';
+    if (/57014|statement timeout/i.test(b))
+      return 'Supabase membatalkan penyimpanan karena terlalu lama (timeout). Jalankan perintah "statement_timeout" dari README di SQL Editor, lalu muat ulang halaman.';
     if (/PGRST205|42P01|Could not find the table|does not exist/i.test(b))
       return 'Tabel kv_store / kv_items belum ada di project ini. Jalankan supabase-setup.sql di SQL Editor Supabase (project yang sama dengan Project URL), lalu muat ulang halaman.';
     if (/secret API key/i.test(b)) return 'Secret key tidak boleh dipakai di browser. Ganti dengan anon public / Publishable key.';
@@ -260,28 +262,41 @@
     }, function (e) { throw httpError(0, e.message); });
   }
 
+  // Satu kunci = satu kiriman, dan kunci yang sama tidak pernah dikirim dua kali bersamaan.
+  // Perubahan yang terjadi selama kiriman berjalan digabung dan dikirim sesudahnya.
+  var failCount = {};
+  function backoff(k) { return failCount[k] ? Math.min(30000, 2000 * Math.pow(2, failCount[k] - 1)) : 300; }
+
   function flush(keepalive) {
-    var keys = Object.keys(pending);
-    if (!keys.length) return;
-    pending = {};
-    var ups = [], dels = [];
-    keys.forEach(function (k) {
+    Object.keys(pending).forEach(function (k) {
+      if (inflight[k]) return;                 // tunggu kiriman sebelumnya selesai
+      delete pending[k];
       var v = origGet.call(ls, k);
-      if (v === null) { if (lastBlob[k] !== undefined) dels.push(k); }
-      else if (v !== lastBlob[k]) ups.push({ key: k, value: v, client_id: clientId });
+      if (v === null) {
+        if (lastBlob[k] === undefined) return;
+        inflight[k] = 1;
+        send('DELETE', 'kv_store?key=eq.' + enc(k), null, 'return=minimal', keepalive === true)
+          .then(function () { delete lastBlob[k]; failCount[k] = 0; })
+          .catch(function (e) { failCount[k] = (failCount[k] || 0) + 1; reportError('Gagal menghapus ' + k, e); pending[k] = 1; })
+          .then(function () { delete inflight[k]; if (pending[k]) setTimeout(flush, backoff(k)); });
+        return;
+      }
+      if (v === lastBlob[k]) return;
+      inflight[k] = 1;
+      send('POST', 'kv_store?on_conflict=key', JSON.stringify([{ key: k, value: v, client_id: clientId }]),
+           'resolution=merge-duplicates,return=minimal', keepalive === true)
+        .then(function () {
+          lastBlob[k] = v; failCount[k] = 0;
+          pushFailing = Object.keys(failCount).some(function (x) { return failCount[x] > 0; });
+          if (!pushFailing && PosSync.status === 'error') setStatus(rtLive ? 'live' : 'poll');
+        })
+        .catch(function (e) {
+          failCount[k] = (failCount[k] || 0) + 1; pushFailing = true;
+          reportError('Gagal mengirim ' + k + ' (' + Math.round(v.length / 1024) + ' KB)', e);
+          pending[k] = 1;
+        })
+        .then(function () { delete inflight[k]; if (pending[k]) setTimeout(flush, backoff(k)); });
     });
-    if (ups.length) {
-      ups.forEach(function (u) { inflight[u.key] = 1; });
-      send('POST', 'kv_store?on_conflict=key', JSON.stringify(ups), 'resolution=merge-duplicates,return=minimal', keepalive === true)
-        .then(function () { ups.forEach(function (u) { lastBlob[u.key] = u.value; }); pushFailing = false; if (PosSync.status === 'error') setStatus(rtLive ? 'live' : 'poll'); })
-        .catch(function (e) { pushFailing = true; reportError('Gagal mengirim data', e); ups.forEach(function (u) { pending[u.key] = 1; }); retryLater(); })
-        .then(function () { ups.forEach(function (u) { delete inflight[u.key]; }); });
-    }
-    if (dels.length) {
-      send('DELETE', 'kv_store?key=in.(' + dels.map(enc).join(',') + ')', null, 'return=minimal', keepalive === true)
-        .then(function () { dels.forEach(function (k) { delete lastBlob[k]; }); })
-        .catch(function (e) { reportError('Gagal menghapus data', e); dels.forEach(function (k) { pending[k] = 1; }); retryLater(); });
-    }
   }
 
   function pushItems(k) {
