@@ -645,7 +645,7 @@
       try { extras = JSON.parse(localStorage.getItem('resto_sim_extra_margin_menus') || '[]'); }
       catch (e) { extras = []; }
       extras = extras.filter(m => !m || !m.name || String(m.name).toLowerCase() !== name.toLowerCase());
-      extras.push({ name, cat: category, price });
+      extras.push({ name, cat: category, price, manual: true });   // manual: tidak ikut disembunyikan saat disamakan dengan Kasir
       localStorage.setItem('resto_sim_extra_margin_menus', JSON.stringify(extras));
       const hiddenMenus = getHiddenMarginMenus().filter(m => String(m).toLowerCase() !== name.toLowerCase());
       localStorage.setItem('resto_sim_hidden_margin_menus', JSON.stringify(hiddenMenus));
@@ -1021,7 +1021,39 @@
     }
 
     /* SINKRONISASI POS & EXCEL */
+    /* Samakan Kelola Margin persis dengan menu di Kasir (dipakai tombol "Sinkronkan Data POS").
+       Menu yang tidak ada di Kasir disembunyikan, kecuali menu yang ditambahkan manual di Kelola Margin.
+       Pengaturan margin/HPP menu yang disembunyikan tetap disimpan. */
+    function mirrorKasirMenusToMargin() {
+      let pos;
+      try { pos = JSON.parse(localStorage.getItem('world_taste_pos_app_data') || 'null'); } catch (e) { return null; }
+      if (!pos || !Array.isArray(pos.products) || !pos.products.length) return null;
+      const products = pos.products.filter(p => p && String(p.name || '').trim());
+      upsertMenuMasters(products.map(p => ({ name: p.name, cat: p.category, price: p.price })), { unhide: true });
+      alignMarginNamesWithKasir(products);
+      const inKasir = new Set(products.map(p => normMenuName(p.name)));
+      let extras = readJSONKey('resto_sim_extra_margin_menus', []);
+      const manual = new Set(extras.filter(m => m && m.manual).map(m => normMenuName(m.name)));
+      const keep = n => { const k = normMenuName(n); return !k || inKasir.has(k) || manual.has(k); };
+
+      const hidden = getHiddenMarginMenus();
+      const removed = [];
+      recipeData.forEach(r => { if (!hidden.includes(r.menuName) && !keep(r.menuName) && !removed.includes(r.menuName)) removed.push(r.menuName); });
+      const names = new Set();
+      recipeData.forEach(r => names.add(r.menuName));
+      extras.forEach(m => m && m.name && names.add(m.name));
+      (rawData || []).forEach(d => d && d.Produk && names.add(d.Produk));
+      try { (JSON.parse(localStorage.getItem('resto_pos_sim_app_data') || '{}').products || []).forEach(p => p && p.name && names.add(p.name)); } catch (e) {}
+      names.forEach(n => { if (!keep(n) && !hidden.includes(n)) hidden.push(n); });
+      extras = extras.filter(m => m && m.name && keep(m.name));
+      localStorage.setItem('resto_sim_extra_margin_menus', JSON.stringify(extras));
+      localStorage.setItem('resto_sim_hidden_margin_menus', JSON.stringify(hidden));
+      localStorage.setItem(KASIR_MENU_SEEN_KEY, JSON.stringify(products.map(p => p.name)));
+      return { total: products.length, removed };
+    }
+
     function syncWithHTML1Data() {
+      const fromButton = !!(window.event && window.event.type === 'click');
       const localRaw = localStorage.getItem('world_taste_pos_app_data') || localStorage.getItem('resto_pos_sim_app_data');
       if (localRaw) {
         try {
@@ -1030,6 +1062,14 @@
           if (appData.recipes) recipeData = appData.recipes;
           if (appData.products && appData.products.length > 0) {
             upsertMenuMasters(appData.products.map(p => ({ name: p.name, cat: p.category, price: p.price })), { unhide: true });
+          }
+          if (fromButton) {
+            const res = mirrorKasirMenusToMargin();
+            if (res) {
+              renderRecipeModule();
+              setTimeout(() => alert(`Kelola Margin sudah disamakan dengan menu Kasir (${res.total} menu).` +
+                (res.removed.length ? `\n\nDisembunyikan karena tidak ada di Kasir:\n- ${res.removed.join('\n- ')}` : '')), 50);
+            }
           }
           if (appData.sales && appData.sales.length > 0) {
             const normalized = [];
@@ -1084,6 +1124,43 @@
        ditambahkan lagi di Kasir, margin lamanya kembali. Menu yang sengaja dihapus
        di Kelola Margin tetap tersembunyi walau masih ada di Kasir. */
     const KASIR_MENU_SEEN_KEY = 'resto_sim_kasir_menu_seen';
+
+    /* Samakan ejaan nama menu di Kelola Margin dengan ejaan di Kasir
+       (mis. "Iced Lemon Tea" vs "Iced Lemon tea"), supaya satu menu tidak muncul dua kali.
+       Pengaturan margin/HPP pindah ke nama versi Kasir. */
+    function alignMarginNamesWithKasir(products) {
+      const exact = new Map(products.map(p => [normMenuName(p.name), p.name]));
+      const isVariant = n => { const ex = exact.get(normMenuName(n)); return !!ex && n !== ex; };
+      let changed = false;
+      recipeData.forEach(r => {
+        if (!isVariant(r.menuName)) return;
+        const ex = exact.get(normMenuName(r.menuName));
+        if (!recipeData.some(x => x !== r && x.menuName === ex)) { r.menuName = ex; changed = true; }
+      });
+      const variants = new Set();
+      recipeData.forEach(r => isVariant(r.menuName) && variants.add(r.menuName));
+      (rawData || []).forEach(d => d && isVariant(d.Produk) && variants.add(d.Produk));
+      try { (JSON.parse(localStorage.getItem('resto_pos_sim_app_data') || '{}').products || []).forEach(p => p && isVariant(p.name) && variants.add(p.name)); } catch (e) {}
+      let extras = readJSONKey('resto_sim_extra_margin_menus', []);
+      const seenKeys = new Set();
+      const newExtras = [];
+      extras.forEach(m => {
+        if (!m || !m.name) return;
+        const k = normMenuName(m.name);
+        if (isVariant(m.name)) { variants.add(m.name); m.name = exact.get(k); changed = true; }
+        if (seenKeys.has(k)) { changed = true; return; }
+        seenKeys.add(k); newExtras.push(m);
+      });
+      const hidden = getHiddenMarginMenus();
+      variants.forEach(v => { if (!hidden.includes(v)) { hidden.push(v); changed = true; } });
+      if (changed) {
+        localStorage.setItem('resto_sim_extra_margin_menus', JSON.stringify(newExtras));
+        localStorage.setItem('resto_sim_hidden_margin_menus', JSON.stringify(hidden));
+        saveRecipesToStorage();
+      }
+      return changed;
+    }
+
     function syncKasirMenusToMargin() {
       let pos;
       try { pos = JSON.parse(localStorage.getItem('world_taste_pos_app_data') || 'null'); } catch (e) { return false; }
@@ -1101,6 +1178,7 @@
         .push({ name: p.name, cat: p.category, price: p.price }));
       if (fresh.length) upsertMenuMasters(fresh, { unhide: true });
       if (known.length) upsertMenuMasters(known, {});
+      alignMarginNamesWithKasir(products);
 
       // 2) Menu yang sudah tidak ada di Kasir disembunyikan dari Kelola Margin.
       const gone = new Set();
