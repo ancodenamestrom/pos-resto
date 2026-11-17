@@ -180,6 +180,7 @@
   var pending = {};       // kunci yang menunggu dikirim
   var inflight = {};      // kunci yang sedang dikirim
   var sinceStore = null, sinceItems = null;
+  var knownTs = {};       // key -> updated_at versi yang sudah dimiliki browser ini (hindari unduh ulang)
 
   function applyBlob(k, v, notify) {
     var old = origGet.call(ls, k);
@@ -293,6 +294,7 @@
     blobs.forEach(function (r) {
       remote[r.key] = 1;
       sinceStore = later(sinceStore, r.updated_at);
+      knownTs[r.key] = r.updated_at;
     });
     use.forEach(function (r) {
       applyBlob(r.key, unpack(r.value), false);
@@ -421,13 +423,22 @@
     if (pulling) { pullAgain = true; return; }
     pulling = true;
     var notMe = '&or=' + enc('(client_id.is.null,client_id.neq.' + clientId + ')');
-    var bPath = 'kv_store?select=key,value,updated_at&updated_at=gte.' + enc(sinceParam(sinceStore)) + notMe + (SCOPE === 'customer' ? '' : NOT_IMG);
+    // Tahap 1: hanya kunci & waktu ubah (sangat kecil). Isi data diambil di tahap 2 hanya untuk yang benar-benar baru.
+    var bPath = 'kv_store?select=key,updated_at&updated_at=gte.' + enc(sinceParam(sinceStore)) + notMe + (SCOPE === 'customer' ? '' : NOT_IMG);
     var iPath = 'kv_items?select=key,item_id,value,created_at&order=created_at.asc&limit=1000&created_at=gte.' + enc(sinceParam(sinceItems)) + notMe;
     if (SCOPE === 'customer') {
       bPath += '&key=in.(' + CUSTOMER_BLOBS.join(',') + ')';
       iPath += '&key=in.(' + CUSTOMER_ITEMS.join(',') + ')';
     }
     Promise.all([getJSON(bPath), getJSON(iPath)]).then(function (res) {
+      var changed = res[0].filter(function (r) {
+        sinceStore = later(sinceStore, r.updated_at);
+        return canPullBlob(r.key) && knownTs[r.key] !== r.updated_at;
+      }).map(function (r) { return r.key; });
+      if (!changed.length) { res[0] = []; return res; }
+      var vPath = 'kv_store?select=key,value,updated_at&key=in.(' + changed.map(function (k) { return '"' + k + '"'; }).join(',') + ')';
+      return getJSON(vPath).then(function (rows) { res[0] = rows; return res; });
+    }).then(function (res) {
       var miss = missingOf(res[0].filter(function (r) { return canPullBlob(r.key); }).map(function (r) { return r.value; }));
       return miss.length ? fetchImgs(miss).then(function () { return res; }) : res;
     }).then(function (res) {
@@ -436,6 +447,7 @@
         sinceStore = later(sinceStore, r.updated_at);
         if (canPullBlob(r.key) && (holdPush || !pending[r.key]) && !inflight[r.key]) {
           if (applyBlob(r.key, unpack(r.value), true) && holdPush) changedOnRecover = true;
+          knownTs[r.key] = r.updated_at;
         }
       });
       var by = groupItems(res[1]);
