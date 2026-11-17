@@ -1077,12 +1077,64 @@
     }
 
     /* AUTO-SINKRON: gabungkan transaksi & reservasi dari Kasir (upsert per ID struk, tidak menghapus data Excel) */
+    /* Daftar menu Kelola Margin mengikuti menu di Kasir:
+       - menu baru di Kasir ditambahkan, harga & kategori ikut diperbarui,
+       - menu yang dihapus di Kasir disembunyikan dari Kelola Margin.
+       Pengaturan margin/HPP menu yang dihapus tetap disimpan, jadi kalau menu itu
+       ditambahkan lagi di Kasir, margin lamanya kembali. Menu yang sengaja dihapus
+       di Kelola Margin tetap tersembunyi walau masih ada di Kasir. */
+    const KASIR_MENU_SEEN_KEY = 'resto_sim_kasir_menu_seen';
+    function syncKasirMenusToMargin() {
+      let pos;
+      try { pos = JSON.parse(localStorage.getItem('world_taste_pos_app_data') || 'null'); } catch (e) { return false; }
+      if (!pos || !Array.isArray(pos.products) || !pos.products.length) return false;
+      const products = pos.products.filter(p => p && String(p.name || '').trim());
+      const now = new Set(products.map(p => normMenuName(p.name)));
+      const prevList = readJSONKey(KASIR_MENU_SEEN_KEY, null);
+      const prev = new Set((Array.isArray(prevList) ? prevList : []).map(normMenuName));
+      const snapshot = () => [localStorage.getItem('resto_sim_extra_margin_menus'), localStorage.getItem('resto_sim_hidden_margin_menus'), recipeData.length].join('|');
+      const before = snapshot();
+
+      // 1) Menu baru di Kasir selalu tampil; menu lama hanya diperbarui harga/kategorinya.
+      const fresh = [], known = [];
+      products.forEach(p => (Array.isArray(prevList) && !prev.has(normMenuName(p.name)) ? fresh : known)
+        .push({ name: p.name, cat: p.category, price: p.price }));
+      if (fresh.length) upsertMenuMasters(fresh, { unhide: true });
+      if (known.length) upsertMenuMasters(known, {});
+
+      // 2) Menu yang sudah tidak ada di Kasir disembunyikan dari Kelola Margin.
+      const gone = new Set();
+      (Array.isArray(prevList) ? prevList : []).concat(POS_MENU_MASTER.map(m => m.n)).forEach(n => {
+        const k = normMenuName(n);
+        if (k && !now.has(k)) gone.add(k);
+      });
+      if (gone.size) {
+        const hidden = getHiddenMarginMenus();
+        const names = new Set();
+        (Array.isArray(prevList) ? prevList : []).forEach(n => gone.has(normMenuName(n)) && names.add(n));
+        POS_MENU_MASTER.forEach(m => gone.has(normMenuName(m.n)) && names.add(m.n));
+        recipeData.forEach(r => gone.has(normMenuName(r.menuName)) && names.add(r.menuName));
+        (rawData || []).forEach(d => gone.has(normMenuName(d.Produk)) && names.add(d.Produk));
+        names.forEach(n => { if (!hidden.includes(n)) hidden.push(n); });
+        const extras = readJSONKey('resto_sim_extra_margin_menus', []).filter(m => !(m && gone.has(normMenuName(m.name))));
+        localStorage.setItem('resto_sim_extra_margin_menus', JSON.stringify(extras));
+        localStorage.setItem('resto_sim_hidden_margin_menus', JSON.stringify(hidden));
+      }
+      const seen = JSON.stringify(products.map(p => p.name));
+      if (localStorage.getItem(KASIR_MENU_SEEN_KEY) !== seen) localStorage.setItem(KASIR_MENU_SEEN_KEY, seen);
+      return snapshot() !== before;
+    }
+
     function mergePOSIntoDashboard(fromLiveEvent) {
       try {
         const raw = localStorage.getItem('world_taste_pos_app_data') || localStorage.getItem('resto_pos_sim_app_data');
         if (!raw) return false;
         const pos = JSON.parse(raw);
         let changed = false;
+        if (syncKasirMenusToMargin()) {
+          changed = true;
+          if (fromLiveEvent === true) { try { renderRecipeModule(); } catch (e) {} }
+        }
         if (Array.isArray(pos.reservations) && pos.reservations.length) { mergeReservations(pos.reservations); changed = true; }
         if (Array.isArray(pos.sales) && pos.sales.length) {
           const rows = [];
@@ -3044,6 +3096,7 @@
       loadRawDataFromStorage() || syncWithHTML1Data();
       mergePOSIntoDashboard();
       ensurePosMenusInMargin();
+      syncKasirMenusToMargin();   // setelah ensurePosMenusInMargin, supaya menu yang dihapus di Kasir tidak muncul lagi
       ensureStockMenuSync();
       applyFilters();
       refreshSaveLabel();
