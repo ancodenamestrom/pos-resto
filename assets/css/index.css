@@ -3,24 +3,30 @@
       margin: 0;
       min-height: 100vh;
       font-family: Arial, Helvetica, sans-serif;
-      color: #f9fafb;
-      background:
-        radial-gradient(circle at top left, rgba(37, 99, 235, .22), transparent 35%),
-        linear-gradient(135deg, #111827, #0b1220 65%, #172554);
+      color: #fdf8f3;
+      background: #1c1009;
       display: grid;
       place-items: center;
       padding: 24px;
+    }
+    /* Foto interior restoran (sedikit diburamkan) + lapisan gelap hangat supaya tulisan tetap terbaca */
+    body::before {
+      content: ""; position: fixed; inset: -20px; z-index: -1;
+      background:
+        linear-gradient(180deg, rgba(28, 16, 9, .90) 0%, rgba(28, 16, 9, .72) 45%, rgba(28, 16, 9, .82) 100%),
+        url('../img/page-bg.jpg') center / cover no-repeat;
+      filter: blur(5px);
     }
     .container { width: min(900px, 100%); }
     .brand { text-align: center; margin-bottom: 38px; }
     .logo {
       width: 64px; height: 64px; margin: 0 auto 18px;
       display: grid; place-items: center; border-radius: 20px;
-      background: #2563eb; font-size: 30px;
-      box-shadow: 0 12px 35px rgba(37, 99, 235, .3);
+      background: linear-gradient(135deg, #d4a24c, #a8742c); font-size: 30px;
+      box-shadow: 0 12px 35px rgba(212, 162, 76, .35);
     }
-    h1 { margin: 0 0 10px; font-size: clamp(28px, 5vw, 42px); }
-    .subtitle { margin: 0; color: #aab5c7; line-height: 1.6; }
+    h1 { margin: 0 0 10px; font-size: clamp(28px, 5vw, 42px); text-shadow: 0 2px 12px rgba(0,0,0,.45); }
+    .subtitle { margin: 0; color: #e9d9c6; line-height: 1.6; }
     .cards {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 20px;
@@ -28,26 +34,26 @@
     .card {
       display: block; padding: 28px; min-height: 230px;
       color: inherit; text-decoration: none;
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(40, 24, 14, .55);
+      border: 1px solid rgba(255, 233, 204, .18);
       border-radius: 20px; transition: .2s ease;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     }
     .card:hover {
       transform: translateY(-5px);
-      background: rgba(255,255,255,.10);
-      border-color: rgba(96,165,250,.65);
+      background: rgba(52, 31, 18, .70);
+      border-color: rgba(212, 162, 76, .75);
     }
     .icon {
       width: 54px; height: 54px; display: grid; place-items: center;
-      border-radius: 15px; background: rgba(59,130,246,.18);
+      border-radius: 15px; background: rgba(212, 162, 76, .22);
       font-size: 26px; margin-bottom: 22px;
     }
     .card h2 { margin: 0 0 9px; font-size: 22px; }
-    .card p { margin: 0 0 22px; color: #aab5c7; line-height: 1.55; }
-    .link { color: #93c5fd; font-weight: 700; }
-    footer { text-align: center; margin-top: 30px; color: #7f8ba0; font-size: 13px; }
+    .card p { margin: 0 0 22px; color: #e3d2bf; line-height: 1.55; }
+    .link { color: #f0c27a; font-weight: 700; }
+    footer { text-align: center; margin-top: 30px; color: #cdb79e; font-size: 13px; }
     @media (max-width: 600px) {
       .cards { grid-template-columns: 1fr; }
       .card { min-height: auto; }
     }
-  
